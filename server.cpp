@@ -45,31 +45,83 @@ class Stack
 public:
     // Implement these functions:
     Stack()
-    { // initialize the stack
+    { 
+        top=nullptr;
+        count=0;
     }
     void push(const T &val)
     {
 
-        // pushes the value on the stack if max limit is not reached yet.
+        if(MAX_STACK_DEPTH==count){
+            cout<<"STACK IS FULL"<<endl;
+            return;
+        }
+        if(count==0){
+            top=new Node;
+            top->data=val;
+            top->next=nullptr;
+            count++;
+            return;
+        }
+        Node* temp=new Node;
+        temp->next=top;
+        temp->data=val;
+        top=temp;
+        count++;
+
     }
     T pop()
     {
-        // pop the top value on the stack
+        T ans{};
+        if(top==nullptr){
+            cout<<"STACK IS ALREADY EMPTY"<<endl;
+            return ans;
+        }
+        else if(count==1){
+            Node* temp=top;
+            ans=temp->data;
+            delete[] temp;
+            top=nullptr;
+            count--;
+        }
+        else{
+            Node* temp=new Node;
+            temp=top;
+            ans=temp->data;
+            top=top->next;
+            delete[] temp;
+            count--;
+        }
+
     }
     T &peek()
     {
-        // returns the top value on the stack
+         T ans{};
+        if(top==nullptr){
+            cout<<"STACK IS ALREADY EMPTY"<<endl;
+            return ans;
+        }
+        ans=top->data;
     }
     bool isEmpty()
     {
+        return top==nullptr;
     }
     int32_t depth()
     {
+        return count;
     }
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
-        // copies every frame, top to bottom in the array given as a parameter
-        // this is what buildSnapshot() call, returns count written
+        int32_t i=0;
+        Node* temp=new Node;
+        temp=top;
+       while(temp!=nullptr && i<maxLen){
+        out[i]=temp->data;
+        i++;
+        temp=temp->next;
+       }
+       return i;
     }
 };
 
@@ -91,16 +143,55 @@ public:
     // Implement these functions
     Timeline()
     {
+        head=tail=nullptr;
+        stepCount=0;
     }
     void record(Snapshot *s)
     {
-        // add record in the timeline
+        if(head==nullptr){
+            head=new TimelineNode;
+            head->data=s;
+            head->prev=nullptr;
+            head->next=nullptr;
+            tail=head;
+            stepCount++;
+             
+        }
+        else if(stepCount==1){
+            TimelineNode* temp=new TimelineNode;
+            temp->data=s;
+            head->next=temp;
+            tail->next=temp;
+            temp->prev=head;
+            temp->next=nullptr;
+            tail=temp;
+            stepCount++;
+        }
+        else{
+            TimelineNode* temp=new TimelineNode;
+            temp->data=s;
+            temp->next=nullptr;
+            temp->prev=tail;
+            tail->next=temp;
+            tail=tail->next;
+            stepCount++;
+        }
     }
     TimelineNode *begin()
     {
+        TimelineNode* temp=nullptr;
+        if(head==nullptr){
+            cout<<"TIMELINE IS ALREADY EMPTHY THERE IS NO CODE EXECUTED "<<endl;
+            return temp;
+        }
+        else{
+            temp=head;
+            return temp;
+        }
     }
     int32_t getStepCount()
     {
+        return stepCount;
     }
 };
 
@@ -156,19 +247,97 @@ struct PendingPatch
 // PASS 0x0: READING source.bin + VALIDITY CHECK
 bool readSourceLine(ifstream &in, string &out)
 {
-    // reads the next nonblank line
+    string wholeline;
+    while(!in.eof()){
+        getline(in,wholeline);
+        if(in.fail()){
+            break;
+        }
+        if(wholeline.size()>0 && wholeline[wholeline.size()-1]=='\r'){
+            wholeline.pop_back();
+        }
+        int32_t check=0;
+        for(int32_t i=0;i<wholeline.size();i++){
+            if(wholeline[i]!=' ' && wholeline[i]!='\t'){
+                check=1;
+            }
+        }
+        if(check==1){
+            out=wholeline;
+            return true;
+        }
+    }
+    return false;
 }
 string firstWord(const string &line)
 {
-    // returns first word from the input string
+    string word;
+    int32_t count=0;
+    for(int32_t i=0;i<line.size()&& (line[i]==' '||line[i]=='\t');i++){
+        count++;
+    }
+    for(int i=count;i<line.size() && (line[i]!=' '&& line[i]!='\t');i++){
+        word+=line[i];
+    }
+    return word;
 }
 string secondWord(const string &line)
 {
-    // returns the second word
+    string word;
+    int32_t count=0;
+    for(int32_t i=0;i<line.size()&& (line[i]==' '||line[i]=='\t');i++){
+        count++;
+    }
+    int32_t count1=count;
+    for(int32_t i=count1;i<line.size() && (line[i]!=' '&& line[i]!='\t');i++){
+        count++;
+    }
+    count1=count;
+    for(int32_t i=count1;i<line.size()&& (line[i]==' '||line[i]=='\t');i++){
+        count++;
+    }
+    for(int32_t i=count;i<line.size() && (line[i]!=' '&& line[i]!='\t');i++){
+        word+=line[i];
+    }
+    return word;
 }
 bool validateProgram(const char *sourcePath)
 {
-    // for each func defined there should be exactly one func_end and no nested funcs allowed - 
+    ifstream in(sourcePath);
+    if(!in){
+        cout<<"THERE IS SOME ERROR! FILE NOT OPEN"<<endl;
+        return false;
+    }
+    int32_t check_func=0;
+    string line;
+    string word;
+    while(readSourceLine(in,line)){
+        word=firstWord(line);
+        if(word=="func"){
+            if(check_func==0){
+              check_func=1;
+            }
+            else if(check_func==1){
+                cout<<"ERROR: NESTED FUNCTION INCLUDE IN THIS PROGRAM " << endl ;
+                return false;
+            }
+            
+        }
+        else if(word=="func_end"){
+            if(check_func==1){
+                check_func=0;
+            }
+            else if(check_func==0){
+                cout<<"ERROR: FUNC_END IS WRITTEN INVALID " << endl;
+                return false;
+            }
+        }
+    }
+    if(check_func==1){
+        cout<<"FUNCTION HAS NOT ENDING FUNCTION PARAMETERS"<<endl;
+        return false;
+    }
+    return true;
 }
 
 // PASS 0x1: RESOLVE() -> resolve.bin
