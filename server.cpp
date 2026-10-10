@@ -343,12 +343,35 @@ bool validateProgram(const char *sourcePath)
 // PASS 0x1: RESOLVE() -> resolve.bin
 int64_t writeResolveRecord(FILE *f, int64_t offsetField, const string &text)
 {
-    // writes one [offset(8B)][size(4B)][string] record at the current file position
-    // returns this record's own starting byte position
+    int64_t size_ofsett=ftell(f);
+    fwrite(&offsetField,sizeof(offsetField),1,f);
+    int32_t size_of_text=text.length();
+    fwrite(&size_of_text,sizeof(size_of_text),1,f);
+   fwrite(text.c_str(), 1, text.size(), f);
+    return size_ofsett;
+
 }
 int64_t readResolveRecord(FILE *f, string &outText)
 {
-    // reads one record at the current position and advances past it, returns the offset field - the raw line text comes back untouched in outText.
+    int64_t size_ofset=0;
+    int64_t ans=-10;
+    if(fread(&size_ofset,sizeof(size_ofset),1,f)!=1){
+        return ans;
+    }
+    int32_t size_oftext=0;
+    if(fread(&size_oftext,sizeof(size_oftext),1,f)!=1){
+        return ans;
+    }
+    outText.clear();
+    for (int32_t i = 0; i < size_oftext; ++i) {
+        char c;
+        if (fread(&c, sizeof(char), 1, f) != 1) {
+            return ans;
+        }
+        outText.push_back(c); 
+    }
+
+    return size_ofset;
 }
 int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
 {
@@ -356,14 +379,94 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
     int32_t funcCount = 0;
     PendingPatch patches[MAX_PATCHES];
     int32_t patchCount = 0;
-    // Every source line becomes one record holding the raw line, as-is.
-    // resolve() only PEEKS at the leading word(s) -- enough to spot FUNC
-    // (remember its position) and CALL (remember which function it needs
-    // and where its offset field sits).
-    // Once the whole file is written, every CALL's offset field is patched
-    // with its target's position. Patching happens after the full write
-    // Returns the byte offset of main's FUNC header record.
-    // if there is no main return the error 
+    FILE* f;
+    ifstream fin;
+    fin.open(sourcePath);
+    if(!fin){
+        cout<<"ERROR:FILE NOT OPENED"<<endl;
+        return -1;
+    }
+    FILE* fout=fopen(resolveBinPath,"w+b");
+    if(fout==nullptr){
+        cout<<"ERROR: FILE NOT OPENED"<<endl;
+        return -1;
+    }
+    string line;
+    while(readSourceLine(fin,line)){
+        string first=firstWord(line);
+       
+        if (first=="call"){
+            string second=secondWord(line);
+            if(patchCount<MAX_PATCHES){
+                int64_t pos=ftell(fout);
+                writeResolveRecord(fout,pos,line);
+                patches[patchCount].targetFuncName=second;
+                patches[patchCount].byteOffsetOfOffsetField=pos;
+                patchCount++;         
+            }
+            else{
+                fclose(fout);
+                return -1;
+            }
+        }
+        else if(first=="func"){
+            string second=secondWord(line);
+            if(funcCount<MAX_FUNCS){
+                for(int i=0;i<funcCount;i++){
+                    if(funcArray[i].funcName==second){
+                        cout<<"DUPLICATE FUNCTIONS ERROR"<<endl;
+                        fclose(fout);
+                        return -1;
+                    }
+                }
+                int64_t pos=ftell(fout);
+                writeResolveRecord(fout,pos,line);
+                funcArray[funcCount].funcName=second;
+                funcArray[funcCount].byteOffsetInResolveBin=pos;
+                funcCount++;
+            }
+            else{
+                fclose(fout);
+                return -1;
+            }
+        }
+        else{
+            int64_t pos=ftell(fout);
+            writeResolveRecord(fout,pos,line);
+        }
+    }
+    fin.close();
+    int64_t ch=-1;
+    for(int i=0;i<funcCount;i++){
+        if(funcArray[i].funcName=="main"){
+            ch=funcArray[i].byteOffsetInResolveBin;
+        }
+    }
+    if(ch==-1){
+        fclose(fout);
+        return -1;
+    }
+    int64_t checkpatch=-2;
+    int a=0;
+    for(int i=0;i<patchCount;i++){
+        a=0;
+        for(int j=0;j<funcCount;j++){
+            if(funcArray[j].funcName==patches[i].targetFuncName){
+                checkpatch=funcArray[j].byteOffsetInResolveBin;
+                a=1;
+            }
+        }
+        if(a!=0){
+            fseek(fout, patches[i].byteOffsetOfOffsetField, SEEK_SET);   
+            fwrite(&checkpatch, sizeof(int64_t), 1, fout);       
+        }
+        else{
+            fclose(fout);
+            return -1;
+        }
+    }
+    fclose(fout);
+    return ch;
 }
 
 // PASS 0x2: EXECUTION (tokenization happens here)
@@ -411,19 +514,28 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
 // main section
 int32_t main()
 {
-
-    if (!validateProgram("source.bin"))
-    {
-        // send an error response instead of a .tdbg file
-        return 1;
-    }
-
     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+if (mainOffset < 0)
+{
+    cout<<"THERE IS AN ERROR IN YOUR FILE CHECK AGAIN"<<endl;
+    return 1;
+}
+else{
+    cout<<"EVERYTHING IS CORRECTLY CREATED"<<endl;
+}
 
-    Timeline timeline;
-    executeProgram("resolve.bin", mainOffset, timeline);
+    // if (!validateProgram("source.bin"))
+    // {
+    //     // send an error response instead of a .tdbg file
+    //     return 1;
+    // }
 
-    writeTdbg(timeline, "session.tdbg");
+    // int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
 
-    return 0;
+    // Timeline timeline;
+    // executeProgram("resolve.bin", mainOffset, timeline);
+
+    // writeTdbg(timeline, "session.tdbg");
+
+    // return 0;
 }
