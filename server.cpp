@@ -7,7 +7,10 @@
 //   3. Pass 0X2   -- execute resolve.bin: tokenize ONE line at a time, update the call stack, take a snapshot -> Timeline
 //   4. Pass 0X3   -- serialize Timeline -> session.tdbg(header + snapshot records + dense index)
 
-
+#include <sstream>
+#include <cstdlib>
+#include <climits>
+#include <stdexcept>
 #include <iostream>
 #include <string>
 #include <cstdint>
@@ -75,33 +78,30 @@ public:
         T ans{};
         if(top==nullptr){
             cout<<"STACK IS ALREADY EMPTY"<<endl;
-            return ans;
         }
         else if(count==1){
             Node* temp=top;
             ans=temp->data;
-            delete[] temp;
+            delete temp;
             top=nullptr;
             count--;
         }
         else{
-            Node* temp=new Node;
-            temp=top;
+            Node* temp=top;;
             ans=temp->data;
             top=top->next;
-            delete[] temp;
+            delete temp;
             count--;
         }
-
+      return ans;
     }
     T &peek()
     {
-         T ans{};
         if(top==nullptr){
             cout<<"STACK IS ALREADY EMPTY"<<endl;
-            return ans;
+           throw out_of_range("Stack is empty");
         }
-        ans=top->data;
+        return top->data;
     }
     bool isEmpty()
     {
@@ -114,8 +114,7 @@ public:
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
         int32_t i=0;
-        Node* temp=new Node;
-        temp=top;
+        Node* temp=top;
        while(temp!=nullptr && i<maxLen){
         out[i]=temp->data;
         i++;
@@ -483,6 +482,29 @@ struct Token
 };
 int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 {
+    stringstream ss(line);
+    string w_by_w;
+    int32_t ct = 0;
+    while (ss >> w_by_w)
+    {
+        if(ct==0){
+            tokens[ct].type=KEYWORD;
+        }
+        else if(ct==1){
+            tokens[ct].type=IDENTIFIER;
+        }
+        else if(ct>=maxTokens){
+            cout<<"THERE ARE OUT OF BOUND PARAMETERS"<<endl;
+            return -1;
+        }  
+        else{
+            tokens[ct].type = PARAM;
+        }
+        tokens[ct].text = w_by_w;
+        ct++;
+    }
+
+    return ct;
     // first word is always a instruction keyword
     // instruction set = [func, func_end, call, set, add, sub, mul and div]
     // next word is identifier like name of a function, variable name
@@ -490,10 +512,289 @@ int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 }
 Snapshot *buildSnapshot(Stack<Frame> &callStack)
 {
+     Snapshot *snap = new Snapshot;
+    snap->stackDepth = callStack.snapshot_into(snap->callStack, MAX_STACK_DEPTH);
+    return snap;
     // build the snapshot based on the callStack given
+}
+int32_t findVariable(Frame &frame, const string &name, bool &isArgument)
+{
+    for (int32_t i = 0; i < frame.argc; i++)
+    {
+        if (frame.argv[i].name == name)
+        {
+            isArgument = true;
+            return i;
+        }
+    }
+    for (int32_t i = 0; i < frame.localCount; i++)
+    {
+        if (frame.locals[i].name == name)
+        {
+            isArgument = false;
+            return i;
+        }
+    }
+    return -1;
+}
+bool getValue(Frame &frame, const string &text, int32_t &value)
+{
+    char *endPointer;
+    long number = strtol(text.c_str(), &endPointer, 10);
+    if (endPointer != text.c_str() && *endPointer == '\0')
+    {
+        value = static_cast<int32_t>(number);
+        return true;
+    }
+    bool isArgument = false;
+    int32_t index = findVariable(frame, text, isArgument);
+    if (index == -1)
+    {
+        cout << "ERROR: VARIABLE NOT FOUND: " << text << endl;
+        return false;
+    }
+    if (isArgument)
+        value = frame.argv[index].value;
+    else
+        value = frame.locals[index].value;
+    return true;
+}
+bool setVariableValue(Frame &frame, const string &name, int32_t value)
+{
+    bool isArgument = false;
+    int32_t index = findVariable(frame, name, isArgument);
+    if (index != -1)
+    {
+        if (isArgument)
+            frame.argv[index].value = value;
+        else
+            frame.locals[index].value = value;
+        return true;
+    }
+    if (frame.localCount >= MAX_VARS_PER_FRAME)
+    {
+        cout << "ERROR: TOO MANY LOCAL VARIABLES" << endl;
+        return false;
+    }
+    frame.locals[frame.localCount].name = name;
+    frame.locals[frame.localCount].value = value;
+    frame.localCount++;
+    return true;
+}
+bool executeInstruction(Frame &frame, Token tokens[], int32_t count)
+{
+    if (count < 3)
+    {
+        cout << "ERROR: NOT ENOUGH PARAMETERS" << endl;
+        return false;
+    }
+    string operation = tokens[0].text;
+    string destination = tokens[1].text;
+    string source = tokens[2].text;
+    int32_t sourceValue;
+    if (!getValue(frame, source, sourceValue)){
+       return false;
+    }
+    bool isArgument = false;
+    int32_t index = findVariable(frame, destination, isArgument);
+    int32_t result = 0;
+    if (index != -1)
+    {
+        if (isArgument)
+            result = frame.argv[index].value;
+        else
+            result = frame.locals[index].value;
+    }
+    if (operation == "set")
+        result = sourceValue;
+    else if (operation == "add")
+        result += sourceValue;
+    else if (operation == "sub")
+        result -= sourceValue;
+    else if (operation == "mul")
+        result *= sourceValue;
+    else if (operation == "div")
+    {
+        if (sourceValue == 0)
+        {
+            cout << "ERROR: DIVISION BY ZERO" << endl;
+            return false;
+        }
+
+        result /= sourceValue;
+    }
+    else
+        return false;
+    return setVariableValue(frame, destination, result);
 }
 void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &timeline)
 {
+     FILE *f = fopen(resolveBinPath, "rb");
+    if (f == nullptr)
+    {
+        cout << "ERROR: FILE NOT OPENED" << endl;
+        return;
+    }
+    cout << "executeProgram() started" << endl;
+    Stack<Frame> callStack;
+    if (fseek(f, mainOffset, SEEK_SET) != 0)
+    {
+        cout << "ERROR: MAIN NOT FOUND" << endl;
+        fclose(f);
+        return;
+    }
+    string line;
+    int64_t offset = readResolveRecord(f, line);
+    if (offset == -10)
+    {
+        cout << "ERROR: MAIN HEADER NOT READ" << endl;
+        fclose(f);
+        return;
+    }
+    Token tokens[MAX_TOKENS];
+    int32_t count = tokenizeLine(line, tokens, MAX_TOKENS);
+    if (count < 2 || tokens[0].text != "func" || tokens[1].text != "main")
+    {
+        cout << "ERROR: INVALID MAIN HEADER" << endl;
+        fclose(f);
+        return;
+    }
+    Frame mainFrame{};
+    mainFrame.func_name = "main";
+    mainFrame.argc = 0;
+    mainFrame.returnLine = -1;
+    mainFrame.localCount = 0;
+    callStack.push(mainFrame);
+    timeline.record(buildSnapshot(callStack));
+    while (!callStack.isEmpty())
+    {
+        int64_t recordStart = ftell(f);
+        line.clear();
+        offset = readResolveRecord(f, line);
+        if (offset == -10)
+            break;
+        count = tokenizeLine(line, tokens, MAX_TOKENS);
+        if (count <= 0)
+            continue;
+        cout << "Instruction: " << line << endl;
+        string instruction = tokens[0].text;
+        // 1. RETURN FROM A FUNCTION
+        if (instruction == "func_end")
+        {
+            Frame finished = callStack.pop();
+            if (!callStack.isEmpty())
+            {
+                if (fseek(f, finished.returnLine, SEEK_SET) != 0)
+                    break;
+                string callLine;
+                int64_t callOffset = readResolveRecord(f, callLine);
+                if (callOffset == -10)
+                    break;
+                int64_t resumePosition = ftell(f);
+                Token callTokens[MAX_TOKENS];
+                int32_t callCount = tokenizeLine(callLine, callTokens, MAX_TOKENS);
+                Frame &caller = callStack.peek();
+                // Copy updated arguments back to the caller
+                for (int32_t i = 0;i < finished.argc && i + 2 < callCount;i++)
+                {
+                    string actualName = callTokens[i + 2].text;
+                    bool isArgument = false;
+                    int32_t index =
+                        findVariable(caller, actualName, isArgument);
+                    if (index != -1)
+                    {
+                        if (isArgument)
+                            caller.argv[index].value = finished.argv[i].value;
+                        else
+                            caller.locals[index].value = finished.argv[i].value;
+                    }
+                }
+                fseek(f, resumePosition, SEEK_SET);
+            }
+            timeline.record(buildSnapshot(callStack));
+            continue;
+        }
+        // 2. CALL ANOTHER FUNCTION
+        if (instruction == "call")
+        {
+            if (count < 2 || callStack.depth() >= MAX_STACK_DEPTH)
+            {
+                cout << "ERROR: INVALID CALL OR STACK FULL" << endl;
+                break;
+            }
+            // The call record contains the function's target offset
+            int64_t targetOffset = offset;
+            int64_t resumePosition = ftell(f);
+            if (fseek(f, targetOffset, SEEK_SET) != 0)
+            {
+                cout << "ERROR: FUNCTION NOT FOUND" << endl;
+                break;
+            }
+            string header;
+            int64_t headerOffset = readResolveRecord(f, header);
+            if (headerOffset == -10)
+                break;
+            int64_t bodyPosition = ftell(f);
+            Token headerTokens[MAX_TOKENS];
+            int32_t headerCount = tokenizeLine(header, headerTokens, MAX_TOKENS);
+            if (headerCount < 2 || headerTokens[0].text != "func")
+            {
+                cout << "ERROR: INVALID FUNCTION HEADER" << endl;
+                break;
+            }
+            if (count - 2 != headerCount - 2)
+            {
+                cout << "ERROR: WRONG NUMBER OF ARGUMENTS" << endl;
+                fseek(f, resumePosition, SEEK_SET);
+                timeline.record(buildSnapshot(callStack));
+                continue;
+            }
+            Frame newFrame{};
+            newFrame.func_name = headerTokens[1].text;
+            newFrame.argc = 0;
+            newFrame.returnLine = static_cast<int32_t>(recordStart);
+            newFrame.localCount = 0;
+            Frame &caller = callStack.peek();
+            bool valid = true;
+            for (int32_t i = 2; i < headerCount; i++)
+            {
+                int32_t value;
+                if (!getValue(caller, tokens[i].text, value))
+                {
+                    valid = false;
+                    break;
+                }
+                newFrame.argv[newFrame.argc].name = headerTokens[i].text;
+                newFrame.argv[newFrame.argc].value = value;
+                newFrame.argc++;
+            }
+            if (!valid)
+            {
+                fseek(f, resumePosition, SEEK_SET);
+                timeline.record(buildSnapshot(callStack));
+                continue;
+            }
+            callStack.push(newFrame);
+            fseek(f, bodyPosition, SEEK_SET);
+            timeline.record(buildSnapshot(callStack));
+            continue;
+        }
+        // agr hamarey pas operators agye hai compiler mei to usko yaha check krey gey.
+        if (instruction == "set" || instruction == "add" || instruction == "sub" || instruction == "mul" || instruction == "div")
+        {
+            Frame &current = callStack.peek();
+
+            executeInstruction(current, tokens, count);
+
+            timeline.record(buildSnapshot(callStack));
+            continue;
+        }
+
+        // 4. RECORD THE CURRENT STATE
+        timeline.record(buildSnapshot(callStack));
+    }
+
+    fclose(f);
     // initialize the call stack
     // make the main frame
     // push main frame on the call stack
@@ -515,14 +816,23 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
 int32_t main()
 {
     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
-if (mainOffset < 0)
-{
-    cout<<"THERE IS AN ERROR IN YOUR FILE CHECK AGAIN"<<endl;
-    return 1;
-}
-else{
-    cout<<"EVERYTHING IS CORRECTLY CREATED"<<endl;
-}
+
+    // Step 2: Check whether resolving succeeded
+    if (mainOffset == -1)
+    {
+        cout << "Resolve failed!" << endl;
+        return 1;
+    }
+
+    // Step 3: Create timeline
+    Timeline timeline;
+
+    // Step 4: Execute the program
+    executeProgram("resolve.bin", mainOffset, timeline);
+
+    cout << "Execution finished!" << endl;
+
+    return 0;
 
     // if (!validateProgram("source.bin"))
     // {

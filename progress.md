@@ -29,3 +29,20 @@ Then I wrote the demo code of C-- as given in the document into the source.bin f
 
  # From where I will start tomorrow
  First I will complete the Stage 2 Resolve.
+
+  ## DAY 02: October-09-2026
+# What I have implemented
+ # Stage 2 $
+ First i understand stage 2 that what should i do in this stage it takes more than 1 day of me then i start code this . First i start the code of resolveprogram then in the mid when i write my line in resolve.bin thropugh binary i complete the function of writeresolve then write every function with their bytes in resolve.bin and i also check if there is some function then add it to funcArray and if their is some call then add it to patches afre that i can check is there any main in your code or not through funcarray struct i check this array of struct one by one if there is main then store it for return otherwise return error then i check the call function that in call function is function really exist by checking with funcArray if there is any patch dont exist in funcArray then return error.If i find the call function then i write the bytes of function into call function by fseek function.This is all which i have my implemented in my stage 2.
+
+ # From where I will start tomorrow
+ First I will complete the Stage 3.
+
+  ## DAY 03: October-12-2026
+# What I have implemented
+ # Stage 3 $
+ First i understand stage 3 after that i first created helper functions in page that which should i create, then i simply write helper ehich one is getting index of variable from frame or locals then getting value of that variable from frame assigning value to the variable and final helper function is execute compiler by operators like arithmetic operators. then i move to the main function which is execute function first i open the file then i created call stack which store every line of function execution then i start execution through main file then i call these functions to read and tokenize lines. Then i execute instructions through helper functions then check call function. Then check function returns then i store every record in snapshot. Then i check the exit function thats all in stage 3.
+
+ # From where I will start tomorrow
+ First I will complete the Stage 4.
+
