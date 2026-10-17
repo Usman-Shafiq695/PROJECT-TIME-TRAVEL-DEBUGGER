@@ -6,7 +6,7 @@
 //   2. Pass 0X1   -- resolve(): copy EVERY source line into resolve.bin as [offset][size][string], then patch CALL targets.
 //   3. Pass 0X2   -- execute resolve.bin: tokenize ONE line at a time, update the call stack, take a snapshot -> Timeline
 //   4. Pass 0X3   -- serialize Timeline -> session.tdbg(header + snapshot records + dense index)
-
+#include <cstring>
 #include <sstream>
 #include <cstdlib>
 #include <climits>
@@ -225,7 +225,8 @@ void writeHeader(FILE *f, const TTDBHeader &h)
 {
     fwrite(h.magic, 1, 4, f);
     fwrite(&h.version, sizeof(int32_t), 1, f);
-
+    fwrite(&h.stepCount, sizeof(int32_t), 1, f);
+    fwrite(&h.indexOffset, sizeof(int64_t), 1, f);
     // placeholder for other two data members
 }
 
@@ -802,7 +803,61 @@ void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &ti
     // implementation:
     // execute line by line, and according to the keyword perform action
 }
-
+bool writeString(FILE *f, const string &s)
+{
+    int32_t length = static_cast<int32_t>(s.size());
+    if (fwrite(&length, sizeof(int32_t), 1, f) != 1)
+        return false;
+    if (length > 0)
+    {
+        if (fwrite(s.data(), 1, length, f) !=
+            static_cast<size_t>(length))
+            return false;
+    }
+    return true;
+}
+bool writeVariable(FILE *f, const Variable &v)
+{
+    if (!writeString(f, v.name))
+        return false;
+    if (fwrite(&v.value, sizeof(int32_t), 1, f) != 1)
+        return false;
+    return true;
+}
+bool writeSnapshot(FILE *f, const Snapshot &snap)
+{
+    if (fwrite(&snap.stackDepth,sizeof(int32_t), 1, f) != 1)
+        return false;
+    if (snap.stackDepth < 0 || snap.stackDepth > MAX_STACK_DEPTH)
+        return false;
+    for (int32_t i = 0; i < snap.stackDepth; i++)
+    {
+        const Frame &frame = snap.callStack[i];
+        if (!writeString(f, frame.func_name))
+            return false;
+        if (frame.argc < 0 || frame.argc > MAX_VARS_PER_FRAME || frame.localCount < 0 || frame.localCount > MAX_VARS_PER_FRAME)
+            return false;
+        if (fwrite(&frame.argc, sizeof(int32_t), 1, f) != 1)
+            return false;
+        for (int32_t j = 0; j < frame.argc; j++)
+        {
+            if (!writeVariable(f, frame.argv[j]))
+                return false;
+        }
+        if (fwrite(&frame.returnLine,
+                   sizeof(int32_t), 1, f) != 1)
+            return false;
+        if (fwrite(&frame.localCount,
+                   sizeof(int32_t), 1, f) != 1)
+            return false;
+        for (int32_t j = 0; j < frame.localCount; j++)
+        {
+            if (!writeVariable(f, frame.locals[j]))
+                return false;
+        }
+    }
+    return true;
+}
 // PASS 0x3: SERIALIZE TIMELINE
 void writeTdbg(Timeline &timeline, const char *tdbgPath)
 {
@@ -811,41 +866,98 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
     // placing each snapshot in the file while maintaining the index(starting point of each nth snapshot)
     // after timeline add the index array i the file
     // update the header
+     FILE *f = fopen(tdbgPath, "wb+");
+    if (f == nullptr)
+    {
+        cout << "ERROR: Cannot create TDBG file" << endl;
+        return;
+    }
+    int32_t stepCount = timeline.getStepCount();
+    if (stepCount < 0)
+    {
+        fclose(f);
+        cout << "ERROR: Invalid timeline size" << endl;
+        return;
+    }
+    TTDBHeader header;
+    memcpy(header.magic, "TTDB", 4);
+    header.version = 1;
+    header.stepCount = stepCount;
+    header.indexOffset = 0;
+    writeHeader(f, header);
+    int64_t *index = nullptr;
+    if (stepCount > 0)
+    {
+        index = new int64_t[stepCount];
+    }
+    TimelineNode *node = timeline.begin();
+    int32_t written = 0;
+    bool success = true;
+    while (node != nullptr && written < stepCount)
+    {
+        if (node->data == nullptr)
+        {
+            success = false;
+            break;
+        }
+        index[written] = static_cast<int64_t>(ftell(f));
+        if (index[written] < 0 || !writeSnapshot(f, *node->data))
+        {
+            success = false;
+            break;
+        }
+        written++;
+        node = node->next;
+    }
+    if (written != stepCount)
+        success = false;
+    if (success)
+    {
+        header.indexOffset = static_cast<int64_t>(ftell(f));
+        if (header.indexOffset < 0)
+            success = false;
+    }
+    if (success)
+    {
+        for (int32_t i = 0; i < stepCount; i++)
+        {
+            if (fwrite(&index[i], sizeof(int64_t), 1, f) != 1)
+            {
+                success = false;
+                break;
+            }
+        }
+    }
+    if (success)
+    {
+        if (fseek(f, 0, SEEK_SET) != 0)
+            success = false;
+        else
+            writeHeader(f, header);
+    }
+    delete[] index;
+    if (fclose(f) != 0)
+        success = false;
+    if (success)
+        cout << "TDBG file created successfully: "
+             << tdbgPath << endl;
+    else
+        cout << "ERROR: Failed to write TDBG file" << endl;
 }
 // main section
 int32_t main()
 {
     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
-
-    // Step 2: Check whether resolving succeeded
     if (mainOffset == -1)
     {
         cout << "Resolve failed!" << endl;
         return 1;
     }
-
-    // Step 3: Create timeline
     Timeline timeline;
-
-    // Step 4: Execute the program
     executeProgram("resolve.bin", mainOffset, timeline);
-
     cout << "Execution finished!" << endl;
-
+    cout << "Snapshots recorded: "
+     << timeline.getStepCount() << endl;
+    writeTdbg(timeline, "session.tdbg");
     return 0;
-
-    // if (!validateProgram("source.bin"))
-    // {
-    //     // send an error response instead of a .tdbg file
-    //     return 1;
-    // }
-
-    // int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
-
-    // Timeline timeline;
-    // executeProgram("resolve.bin", mainOffset, timeline);
-
-    // writeTdbg(timeline, "session.tdbg");
-
-    // return 0;
 }
