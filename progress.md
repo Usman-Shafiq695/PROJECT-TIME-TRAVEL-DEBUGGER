@@ -46,3 +46,14 @@ Then I wrote the demo code of C-- as given in the document into the source.bin f
  # From where I will start tomorrow
  First I will complete the Stage 4.
 
+ ## DAY 04: October-17-2026
+  ## forget to commit so i commit it on November-06-2026 but i commit the code already 3 weeks ago
+# What I have implemented
+# Stage 4 $
+First i understand stage 4, in which i have to save the whole timeline in a file called session.tdbg so the client can go to any step later. I wrote the helper functions first. writestring writes the length and then the letters, writevariable writes the name and the value, and writesnapshot writes the stack depth and then every frame one by one. I write only the used variables, so every snapshot has a different size and thats why we need the index.
+Then i wrote writetdbg. It makes the file and writes a fake header first because i dont know the indexoffset yet. Then it goes through the timeline, saves the file position of every snapshot in the index array and writes the snapshot. After the last one it writes the index array at the end, then goes back with fseek and writes the real header again. At the end it closes the file and checks that everything worked.
+I tested it with the demo code and it gave 7 snapshots and a 371 byte file.
+
+# From where I will start tomorrow
+First I will start Phase 2, which has the client, the load balancer and the checksum.
+
