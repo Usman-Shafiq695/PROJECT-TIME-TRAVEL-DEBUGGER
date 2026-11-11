@@ -57,7 +57,11 @@ I tested it with the demo code and it gave 7 snapshots and a 371 byte file.
 # From where I will start tomorrow
 First I will start Phase 2, which has the client, the load balancer and the checksum.
 
- ## DAY 03: October-12-2026
+ ## DAY 03: November-07-2026
 # What I have implemented
 First I understand the whole phase 2, then i added the client.cpp,load_balancer.cpp and helper.h. then i run the load balancer and check that it added to the file or not then i found out that there is error in helper.h of string and int64_t type library missing in the helper.h. then i remove this error.
+
+## DAY 03: November-11-2026
+# What I have implemented
+I implemented the load balancer file in my code. First of all, I learned socket programming properly. I went through every lesson of it, which took me about a full day. After that, I started implementing it in the .cpp file. First I built the queue. Then I built the socket helper functions, and in that I learned how all the data is transferred, how error messages are sent, and how the connection with the server and with the client works, and how to wake up the server if it is off. Then I learned how to run two queues at the same time using threads. I tried my best to do everything that was in the load balancer.
 
