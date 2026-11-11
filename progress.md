@@ -57,3 +57,7 @@ I tested it with the demo code and it gave 7 snapshots and a 371 byte file.
 # From where I will start tomorrow
 First I will start Phase 2, which has the client, the load balancer and the checksum.
 
+ ## DAY 03: October-12-2026
+# What I have implemented
+First I understand the whole phase 2, then i added the client.cpp,load_balancer.cpp and helper.h. then i run the load balancer and check that it added to the file or not then i found out that there is error in helper.h of string and int64_t type library missing in the helper.h. then i remove this error.
+
